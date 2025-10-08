@@ -6,18 +6,17 @@ import (
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
 )
 
+// Validate checks all the fields in the Pool struct and returns an error
+// if the configuration is invalid. This function acts as a middleware
+// for all Pool-based operations.
+//
+// Validation rules:
+//  1. If pooling mode is auto, p.AutoConfig must be set and initialized.
+//  2. p.AutoConfig.MinChannels must be greater than 0 in auto mode.
+//  3. If MaxChannels is not set to Auto in p.AutoConfig, it must be
+//     greater than or equal to p.AutoConfig.MinChannels.
+//  4. If pooling mode is not auto, p.NChan must be greater than 0.
 func (p *Pool) Validate() error {
-	/*
-		Validate() will validate all the fields in the Pool struct and throws an error if the config
-		is not set properly or set wrongly.
-		This function would serve as the middleware for all Pool based functions.
-
-		1. If pooling mode is auto, p.AutoConfig.MinChannels should not be less than or equal to 0.
-		2. If pooling mode is auto, p.AutoConfig should be set and initialized.
-		3. If MaxChannels is not set to auto in p.AutoConfig, it should not be less than p.AutoConfig.MinChannels.
-		4. If pooling mode is not auto, p.NChan should not be less than or equal to 0
-	*/
-
 	if p.Auto {
 		if p.AutoConfig == nil {
 			return errors.New(mqerrors.MISSING_AUTO_CONFIG)
