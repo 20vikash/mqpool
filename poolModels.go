@@ -4,11 +4,6 @@ const (
 	Auto = -1
 )
 
-const (
-	PUBLISHER = "publisher"
-	CONSUMER  = "consumer"
-)
-
 /*
 AutoPool struct defines the Min and Max channels for dynamic channel resizing
 */
@@ -21,10 +16,9 @@ type AutoPool struct {
 PoolConfig struct is the main struct to initialize channel pooling.
 */
 type PoolConfig struct {
-	Type       string   // Set it to either PUBLISHER or CONSUMER
-	Auto       bool     // Set it to true if dynamic pooling is required
-	NChan      int      // NChan is the number of channels in the pool for static pool(if Auto = false)
-	AutoConfig AutoPool // Initialize this if Auto = true
+	Auto       bool      // Set it to true if dynamic pooling is required
+	NChan      int       // NChan is the number of channels in the pool for static pool(if Auto = false)
+	AutoConfig *AutoPool // Initialize this if Auto = true
 }
 
 /*
