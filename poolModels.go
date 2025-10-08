@@ -13,9 +13,9 @@ type AutoPool struct {
 }
 
 /*
-PoolConfig struct is the main struct to initialize channel pooling.
+Pool struct is the main struct to initialize channel pooling.
 */
-type PoolConfig struct {
+type Pool struct {
 	Auto       bool      // Set it to true if dynamic pooling is required
 	NChan      int       // NChan is the number of channels in the pool for static pool(if Auto = false)
 	AutoConfig *AutoPool // Initialize this if Auto = true
