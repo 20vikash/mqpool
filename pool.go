@@ -13,11 +13,15 @@ func (p *Pool) Validate() error {
 		This function would serve as the middleware for all Pool based functions.
 
 		1. If pooling mode is auto, p.AutoConfig.MinChannels should not be less than or equal to 0.
-		2. If MaxChannels is not set to auto in p.AutoConfig, it should not be less than p.AutoConfig.MinChannels.
-		3. If pooling mode is not auto, p.NChan should not be less than or equal to 0
+		2. If pooling mode is auto, p.AutoConfig should be set and initialized.
+		3. If MaxChannels is not set to auto in p.AutoConfig, it should not be less than p.AutoConfig.MinChannels.
+		4. If pooling mode is not auto, p.NChan should not be less than or equal to 0
 	*/
 
 	if p.Auto {
+		if p.AutoConfig == nil {
+			return errors.New(mqerrors.MISSING_AUTO_CONFIG)
+		}
 		if p.AutoConfig.MinChannels <= 0 {
 			return errors.New(mqerrors.INVALID_MIN_CHANNEL)
 		}

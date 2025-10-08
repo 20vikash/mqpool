@@ -5,4 +5,5 @@ const (
 	INVALID_MIN_CHANNEL = "min channels must be > 0 in auto mode"
 	INVALID_MAX_CHANNEL = "max channels must be >= min channels"
 	INVALID_NCHAN       = "nChan must be > 0 in static mode"
+	MISSING_AUTO_CONFIG = "autoConfig cannot be nil when Auto mode is enabled"
 )
