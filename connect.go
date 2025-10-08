@@ -9,14 +9,19 @@ import (
 )
 
 type Mq struct {
-	User         string
-	Pass         string
-	Port         string
-	Host         string
-	RetryCounter int
+	User         string // Username
+	Pass         string // Password
+	Port         string // Port number
+	Host         string // Host name
+	RetryCounter int    // Retry counter for connection
 }
 
 func (mq *Mq) ConnectToMq() (*amqp.Connection, error) {
+	/*
+		ConnectToMq() tries to connect to RabbitMQ server with the given MQ struct.
+		Retries for MQ.Retrycounter times.
+	*/
+
 	var err error
 	var conn *amqp.Connection
 	for i := range mq.RetryCounter { // Retry for mq.RetryCounter times
