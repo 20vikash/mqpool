@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // Validate checks all the fields in the Pool struct and returns an error
@@ -16,7 +17,7 @@ import (
 //  3. If MaxChannels is not set to Auto in p.AutoConfig, it must be
 //     greater than or equal to p.AutoConfig.MinChannels.
 //  4. If pooling mode is not auto, p.NChan must be greater than 0.
-func (p *Pool) Validate() error {
+func (p *Pool) validate() error { // Non exported method
 	if p.Auto {
 		if p.AutoConfig == nil {
 			return errors.New(mqerrors.MISSING_AUTO_CONFIG)
@@ -32,4 +33,34 @@ func (p *Pool) Validate() error {
 	}
 
 	return nil
+}
+
+// Init() will Initialize the mq channel pool either statically or dynamically
+// based on Pool.Auto
+func (p *Pool) Init() (*channelPool, error) { // Exported method
+	// Validate the Pool object before initializing pool
+	err := p.validate()
+	if err != nil {
+		return nil, err
+	}
+
+	if !p.Auto { // Static pooling
+		chPool := &channelPool{
+			Pool: make(chan *amqp.Channel, p.NChan),
+			Conn: p.Conn,
+		}
+
+		for range p.NChan {
+			ch, err := p.Conn.Channel()
+			if err != nil {
+				return nil, errors.New(mqerrors.CANNOT_CREATE_CHANNEL)
+			}
+
+			chPool.Pool <- ch
+		}
+
+		return chPool, nil
+	}
+
+	return nil, nil
 }

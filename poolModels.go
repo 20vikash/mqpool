@@ -1,5 +1,9 @@
 package mqpool
 
+import (
+	amqp "github.com/rabbitmq/amqp091-go"
+)
+
 const (
 	Auto = -1
 )
@@ -12,9 +16,10 @@ type AutoPool struct {
 
 // Pool struct is the main struct to initialize channel pooling.
 type Pool struct {
-	Auto       bool      // Set it to true if dynamic pooling is required
-	NChan      int       // NChan is the number of channels in the pool for static pool(if Auto = false)
-	AutoConfig *AutoPool // Initialize this if Auto = true
+	Conn       *amqp.Connection // The MQ connection object
+	Auto       bool             // Set it to true if dynamic pooling is required
+	NChan      int              // NChan is the number of channels in the pool for static pool(if Auto = false)
+	AutoConfig *AutoPool        // Initialize this if Auto = true
 }
 
 // RetryConfig struct is optional if queues wants to get binded with retry queues.
@@ -24,4 +29,10 @@ type RetryConfig struct {
 	RetryQueueName string // Set this field if Auto = false
 	MaxRetries     int    // Max retries before NACK
 	TTL            int    // Time to live before next attempt
+}
+
+// channelPool struct is what you get once you initialize pool using Pool.Init()
+type channelPool struct {
+	Pool chan *amqp.Channel // Buffered chan of *amqp.Channel which is the actual pool
+	Conn *amqp.Connection   // The connection that handles all the channels
 }
