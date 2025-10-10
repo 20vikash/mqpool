@@ -22,7 +22,7 @@ func (r *RetryConfig) RetryInit(p *Pool, mainQueueConfig, retryQueueConfig *Queu
 
 	ch = p.GetFreeChannel()
 
-	_, err = r.createRetryQueue(ch, mainQueue.Name, r.RetryQueue, r.RetryQueue, retryQueueConfig, p)
+	_, err = r.createRetryQueue(ch, r.MainQueue, r.RetryQueue, r.RetryExchange, retryQueueConfig, p)
 	if err != nil {
 		return nil, errors.New(mqerrors.CANNOT_CREATE_RETRY_QUEUE)
 	}
@@ -39,9 +39,9 @@ func (r *RetryConfig) createRetryQueue(ch *amqp.Channel, queueName string, dlq s
 		queueConfig.Exclusive,        // exclusive
 		queueConfig.NoWait,           // no-wait
 		amqp.Table{
-			"x-message-ttl":             int32(1000), // Wait 5 seconds
-			"x-dead-letter-exchange":    exchange,    // Use default exchange
-			"x-dead-letter-routing-key": dlq,         // Send back to main
+			"x-message-ttl":             int32(r.TTL), // Wait r.TTL seconds
+			"x-dead-letter-exchange":    exchange,     // Use user given exchange
+			"x-dead-letter-routing-key": dlq,          // Send back to main
 		},
 	)
 	if err != nil {
