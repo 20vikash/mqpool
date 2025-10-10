@@ -64,3 +64,12 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 
 	return nil, nil
 }
+
+// Stubs
+func (p *Pool) PushChannel(ch *amqp.Channel) {
+
+}
+
+func (p *Pool) GetFreeChannel() *amqp.Channel {
+	return nil
+}
