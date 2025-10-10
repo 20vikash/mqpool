@@ -24,11 +24,20 @@ type Pool struct {
 
 // RetryConfig struct is optional if queues wants to get binded with retry queues.
 type RetryConfig struct {
-	MainQueue      string // Set this value to the main queue that the retry queue gets attached to
-	Auto           bool   // Set it to true if retry queue wants to be handled automatically
-	RetryQueueName string // Set this field if Auto = false
-	MaxRetries     int    // Max retries before NACK
-	TTL            int    // Time to live before next attempt
+	MainQueue     string // Set this value to the main queue that the retry queue gets attached to
+	RetryQueue    string // Set this field if Auto = false
+	MainExchange  string // Exchange name for the main queue
+	RetryExchange string // Exchange for the retry queue
+	MaxRetries    int    // Max retries before NACK
+	TTL           int    // Time to live before next attempt
+}
+
+// QueueConfig contains the fields that is required to create a queue
+type QueueConfig struct {
+	Durable          bool
+	DeleteWhenUnused bool
+	Exclusive        bool
+	NoWait           bool
 }
 
 // channelPool struct is what you get once you initialize pool using Pool.Init()
