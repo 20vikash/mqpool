@@ -45,25 +45,37 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		return nil, err
 	}
 
+	var num int
+
 	if !p.Auto { // Static pooling
-		chPool := &channelPool{
-			Pool: make(chan *amqp.Channel, p.NChan),
-			Conn: p.Conn,
-		}
-
-		for range p.NChan {
-			ch, err := p.Conn.Channel()
-			if err != nil {
-				return nil, errors.New(mqerrors.CANNOT_CREATE_CHANNEL)
-			}
-
-			chPool.Pool <- ch
-		}
-
-		return chPool, nil
+		num = p.NChan
+	} else {
+		num = p.AutoConfig.MinChannels
+	}
+	chPool := &channelPool{
+		Pool: make(chan *amqp.Channel, num),
+		Conn: p.Conn,
 	}
 
-	return nil, nil
+	if p.Auto {
+		num = p.AutoConfig.MaxChannels
+	}
+
+	for range num {
+		ch, err := p.Conn.Channel()
+		if err != nil {
+			return nil, errors.New(mqerrors.CANNOT_CREATE_CHANNEL)
+		}
+
+		chPool.Pool <- ch
+	}
+
+	if p.Auto {
+		// Spin up pool listener to auto scale the pool
+		go p.autoPoolListen()
+	}
+
+	return chPool, nil
 }
 
 // PushChannel() will push ch into p.Pool
@@ -87,7 +99,8 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 //
 // PrefetchCounter ensures the number of messages to send to the consumer before acks.
 //
-// PrefetchCounter will be ignored if the channel is going to be used for Producing.
+// PrefetchCounter will be ignored if the channel is going to be used for Producing. Pass 0 if the channel is
+// going to be used for producing
 func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (*amqp.Channel, error) {
 	select {
 	case ch := <-p.Pool:
@@ -106,4 +119,9 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// Stub
+func (p *Pool) autoPoolListen() {
+
 }
