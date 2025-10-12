@@ -12,15 +12,21 @@ import (
 // This function takes p as the Pool object,
 // mainQueueConfig and retryQueueConfig as QueueConfig object that will be used to create queues.
 // This function returns the main queue which has the retry queue attached.
-func (r *RetryConfig) RetryInit(p *Pool, mainQueueConfig, retryQueueConfig *QueueConfig) (*amqp.Queue, error) {
+func (r *RetryConfig) RetryInit(p *channelPool, mainQueueConfig, retryQueueConfig *QueueConfig) (*amqp.Queue, error) {
 	// Create a queue
-	ch := p.GetFreeChannel()
+	ch, err := p.GetFreeChannel()
+	if err != nil {
+		return nil, err
+	}
 	mainQueue, err := r.createQueueInstance(ch, r.MainQueue, r.RetryQueue, r.MainExchange, mainQueueConfig, p)
 	if err != nil {
 		return nil, errors.New(mqerrors.CANNOT_CREATE_MAIN_QUEUE)
 	}
 
-	ch = p.GetFreeChannel()
+	ch, err = p.GetFreeChannel()
+	if err != nil {
+		return nil, err
+	}
 
 	_, err = r.createRetryQueue(ch, r.MainQueue, r.RetryQueue, r.RetryExchange, retryQueueConfig, p)
 	if err != nil {
@@ -31,7 +37,7 @@ func (r *RetryConfig) RetryInit(p *Pool, mainQueueConfig, retryQueueConfig *Queu
 }
 
 // This function will only be called if RetryConfig.Auto = true
-func (r *RetryConfig) createRetryQueue(ch *amqp.Channel, queueName string, dlq string, exchange string, queueConfig *QueueConfig, pool *Pool) (*amqp.Queue, error) {
+func (r *RetryConfig) createRetryQueue(ch *amqp.Channel, queueName string, dlq string, exchange string, queueConfig *QueueConfig, pool *channelPool) (*amqp.Queue, error) {
 	q, err := ch.QueueDeclare(
 		queueName,                    // name
 		queueConfig.Durable,          // durable
@@ -46,7 +52,7 @@ func (r *RetryConfig) createRetryQueue(ch *amqp.Channel, queueName string, dlq s
 	)
 	if err != nil {
 		// Release the channel
-		pool.PushChannel(ch)
+		err = pool.PushChannel(ch)
 		return nil, err
 	}
 
@@ -57,7 +63,7 @@ func (r *RetryConfig) createRetryQueue(ch *amqp.Channel, queueName string, dlq s
 }
 
 // This function creates a queue and attaches it with the retry Queue.
-func (r *RetryConfig) createQueueInstance(ch *amqp.Channel, queueName string, retryQueue string, exchange string, queueConfig *QueueConfig, pool *Pool) (*amqp.Queue, error) {
+func (r *RetryConfig) createQueueInstance(ch *amqp.Channel, queueName string, retryQueue string, exchange string, queueConfig *QueueConfig, pool *channelPool) (*amqp.Queue, error) {
 	q, err := ch.QueueDeclare(
 		queueName,                    // name
 		queueConfig.Durable,          // durable

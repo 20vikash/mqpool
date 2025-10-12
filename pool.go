@@ -2,6 +2,7 @@ package mqpool
 
 import (
 	"errors"
+	"log"
 
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -65,11 +66,36 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 	return nil, nil
 }
 
-// Stubs
-func (p *Pool) PushChannel(ch *amqp.Channel) {
+// PushChannel() will push ch into p.Pool
+//
+// Reminder: Call this once you are done with an atomic mq operation to release the channel
+func (p *channelPool) PushChannel(ch *amqp.Channel) error {
+	select {
+	case p.Pool <- ch:
+	default:
+		err := ch.Close() // pool full, close the extra channel
+		if err != nil {
+			return err
+		}
+	}
 
+	return nil
 }
 
-func (p *Pool) GetFreeChannel() *amqp.Channel {
-	return nil
+// GetFreeChannel() will try to get a free unused channel from the pool
+//
+// If it fetches a closed channel, it will create a new channel at the moment
+func (p *channelPool) GetFreeChannel() (*amqp.Channel, error) {
+	ch := <-p.Pool
+
+	if ch.IsClosed() { // Close in other part of code, or broker closed it
+		newCh, err := p.Conn.Channel()
+		if err != nil {
+			log.Println("Cannot create a new channel")
+			return nil, err
+		}
+		return newCh, nil
+	}
+
+	return ch, nil
 }
