@@ -82,14 +82,18 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 	return nil
 }
 
-// GetFreeChannel() will try to get a free unused channel from the pool
-//
+// GetFreeChannel() will try to get a free unused channel from the pool.
 // If it fetches a closed channel, it will create a new channel at the moment
-func (p *channelPool) GetFreeChannel() (*amqp.Channel, error) {
+//
+// PrefetchCounter ensures the number of messages to send to the consumer before acks.
+//
+// PrefetchCounter will be ignored if the channel is going to be used for Producing
+func (p *channelPool) GetFreeChannel(prefetchCounter int) (*amqp.Channel, error) {
 	ch := <-p.Pool
 
 	if ch.IsClosed() { // Close in other part of code, or broker closed it
 		newCh, err := p.Conn.Channel()
+		newCh.Qos(prefetchCounter, 0, false)
 		if err != nil {
 			log.Println("Cannot create a new channel")
 			return nil, err

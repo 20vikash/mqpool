@@ -14,7 +14,7 @@ import (
 // This function returns the main queue which has the retry queue attached.
 func (r *RetryConfig) RetryInit(p *channelPool, mainQueueConfig, retryQueueConfig *QueueConfig) (*amqp.Queue, error) {
 	// Create a queue
-	ch, err := p.GetFreeChannel()
+	ch, err := p.GetFreeChannel(0)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func (r *RetryConfig) RetryInit(p *channelPool, mainQueueConfig, retryQueueConfi
 		return nil, errors.New(mqerrors.CANNOT_CREATE_MAIN_QUEUE)
 	}
 
-	ch, err = p.GetFreeChannel()
+	ch, err = p.GetFreeChannel(0)
 	if err != nil {
 		return nil, err
 	}
