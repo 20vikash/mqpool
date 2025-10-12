@@ -1,6 +1,7 @@
 package mqpool
 
 import (
+	"context"
 	"errors"
 
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
@@ -12,9 +13,9 @@ import (
 // This function takes p as the Pool object,
 // mainQueueConfig and retryQueueConfig as QueueConfig object that will be used to create queues.
 // This function returns the main queue which has the retry queue attached.
-func (r *RetryConfig) RetryInit(p *channelPool, mainQueueConfig, retryQueueConfig *QueueConfig) (*amqp.Queue, error) {
+func (r *RetryConfig) RetryInit(ctx context.Context, p *channelPool, mainQueueConfig, retryQueueConfig *QueueConfig) (*amqp.Queue, error) {
 	// Create a queue
-	ch, err := p.GetFreeChannel(0)
+	ch, err := p.GetFreeChannel(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +24,7 @@ func (r *RetryConfig) RetryInit(p *channelPool, mainQueueConfig, retryQueueConfi
 		return nil, errors.New(mqerrors.CANNOT_CREATE_MAIN_QUEUE)
 	}
 
-	ch, err = p.GetFreeChannel(0)
+	ch, err = p.GetFreeChannel(ctx, 0)
 	if err != nil {
 		return nil, err
 	}

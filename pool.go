@@ -1,6 +1,7 @@
 package mqpool
 
 import (
+	"context"
 	"errors"
 
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
@@ -87,19 +88,22 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 // PrefetchCounter ensures the number of messages to send to the consumer before acks.
 //
 // PrefetchCounter will be ignored if the channel is going to be used for Producing.
-func (p *channelPool) GetFreeChannel(prefetchCounter int) (*amqp.Channel, error) {
-	ch := <-p.Pool
+func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (*amqp.Channel, error) {
+	select {
+	case ch := <-p.Pool:
+		if ch.IsClosed() { // Close in other part of code, or broker closed it
+			newCh, err := p.Conn.Channel()
+			if err != nil {
+				return nil, err
+			}
+			if prefetchCounter > 0 {
+				newCh.Qos(prefetchCounter, 0, false)
+			}
+			return newCh, nil
+		}
 
-	if ch.IsClosed() { // Close in other part of code, or broker closed it
-		newCh, err := p.Conn.Channel()
-		if err != nil {
-			return nil, err
-		}
-		if prefetchCounter > 0 {
-			newCh.Qos(prefetchCounter, 0, false)
-		}
-		return newCh, nil
+		return ch, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-
-	return ch, nil
 }
