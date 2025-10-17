@@ -3,6 +3,7 @@ package mqpool
 import (
 	"context"
 	"errors"
+	"time"
 
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -55,9 +56,18 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 	chPool := &channelPool{
 		Pool: make(chan *amqp.Channel, num),
 		Conn: p.Conn,
+		auto: p.Auto,
 	}
 
 	if p.Auto {
+		// Initialize AutoPool fields if p.Auto = true
+		chPool.autoPool = p.AutoConfig
+		chPool.autoPool.waitTime = make(chan int64, p.AutoConfig.MaxChannels)
+		chPool.autoPool.timeOut = make(chan bool)
+		chPool.autoPool.acquireWaitTimeAvg = 0
+		chPool.autoPool.acquireTimeouts = 0
+
+		// Set num to maxChannels
 		num = p.AutoConfig.MaxChannels
 	}
 
@@ -102,6 +112,12 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 // PrefetchCounter will be ignored if the channel is going to be used for Producing. Pass 0 if the channel is
 // going to be used for producing
 func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (*amqp.Channel, error) {
+	var t time.Time
+
+	if p.auto {
+		t = time.Now()
+	}
+
 	select {
 	case ch := <-p.Pool:
 		if ch.IsClosed() { // Close in other part of code, or broker closed it
@@ -115,8 +131,15 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 			return newCh, nil
 		}
 
+		if p.auto {
+			elapsed := time.Since(t)
+			p.autoPool.waitTime <- elapsed.Milliseconds()
+		}
 		return ch, nil
 	case <-ctx.Done():
+		if p.auto {
+			p.autoPool.timeOut <- true
+		}
 		return nil, ctx.Err()
 	}
 }

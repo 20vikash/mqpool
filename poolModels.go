@@ -10,11 +10,12 @@ const (
 
 // AutoPool struct defines the Min and Max channels for dynamic channel resizing
 type AutoPool struct {
-	MinChannels        int      // Minimum number of channels(idle)
-	MaxChannels        int      // Max number of channels
-	waitTime           chan int // Wait time of a specific borrow in nanoseconds
-	acquireWaitTimeAvg int      // Avg of all wait durations in nanoseconds.
-	acquireTimeouts    int      // Count of GetFreeChannel() timeouts.
+	MinChannels        int        // Minimum number of channels(idle)
+	MaxChannels        int        // Max number of channels
+	waitTime           chan int64 // Wait time of a specific borrow in milliseconds
+	timeOut            chan bool  // will be true if a specific GetFreeChannel timesout
+	acquireWaitTimeAvg int64      // Avg of all wait durations in milliseconds.
+	acquireTimeouts    int        // Count of GetFreeChannel() timeouts.
 }
 
 // Pool struct is the main struct to initialize channel pooling.
@@ -45,6 +46,8 @@ type QueueConfig struct {
 
 // channelPool struct is what you get once you initialize pool using Pool.Init()
 type channelPool struct {
-	Pool chan *amqp.Channel // Buffered chan of *amqp.Channel which is the actual pool
-	Conn *amqp.Connection   // The connection that handles all the channels
+	Pool     chan *amqp.Channel // Buffered chan of *amqp.Channel which is the actual pool
+	Conn     *amqp.Connection   // The connection that handles all the channels
+	auto     bool               // will be set to true if Pool.Auto = true
+	autoPool *AutoPool          // will be automatically set if Pool.Auto = true
 }
