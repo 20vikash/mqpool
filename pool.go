@@ -142,7 +142,7 @@ func (p *channelPool) kill() {
 				for {
 					select {
 					case ch := <-p.Pool:
-						if !ch.taken.Load() && time.Since(ch.lastUsed) > 1*time.Minute && p.autoPool.size > p.autoPool.MinChannels {
+						if !ch.taken.Load() && time.Since(ch.lastUsed) > 30*time.Second && p.autoPool.size > p.autoPool.MinChannels {
 							ch.ch.Close()
 
 							atomic.AddInt32(&p.autoPool.size, -1)
@@ -275,6 +275,9 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 		step := 1
 		if avgWait > 200 { // Upscale the step if avg wait time is more than 200ms
 			step = 2
+		}
+		if avgWait > 500 {
+			step = 4
 		}
 
 		newSize := min(activePoolChans+int32(step), max)
