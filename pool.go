@@ -54,7 +54,7 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		num = p.AutoConfig.MinChannels
 	}
 	chPool := &channelPool{
-		Pool: make(chan *amqp.Channel, num),
+		Pool: make(chan *channelModel, num),
 		Conn: p.Conn,
 		auto: p.Auto,
 	}
@@ -77,12 +77,15 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 			return nil, errors.New(mqerrors.CANNOT_CREATE_CHANNEL)
 		}
 
-		chPool.Pool <- ch
+		chPool.Pool <- &channelModel{ch: ch, taken: false}
 	}
+
+	// Length of the pool
+	chPool.autoPool.size = len(chPool.Pool)
 
 	if p.Auto {
 		// Spin up pool listener to auto scale the pool
-		go p.autoPoolListen()
+		go p.autoPoolListen(chPool)
 	}
 
 	return chPool, nil
@@ -92,8 +95,20 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 //
 // Reminder: Call this once you are done with an atomic mq operation to release the channel
 func (p *channelPool) PushChannel(ch *amqp.Channel) error {
+	chModel := &channelModel{ch: ch, taken: false}
+	ok := false
+
+	if chModel.ch.IsClosed() { // Makes sure closed channel dont get pushed
+		channel, err := p.Conn.Channel()
+		if err != nil {
+			return err
+		}
+		chModel = &channelModel{ch: channel, taken: false}
+	}
+
 	select {
-	case p.Pool <- ch:
+	case p.Pool <- chModel:
+		ok = true
 	default:
 		err := ch.Close() // pool full, close the extra channel
 		if err != nil {
@@ -101,7 +116,29 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 		}
 	}
 
+	if ok { // If the channel is idle for 1 minute, close it(scale down)
+		go p.kill(time.NewTimer(1*time.Minute), chModel)
+	}
+
 	return nil
+}
+
+// kill() will close the channel after it exceedes its idle timeout.
+func (p *channelPool) kill(timer *time.Timer, ch *channelModel) {
+	<-timer.C
+
+	if len(p.Pool) > p.autoPool.MinChannels { // If its greater than the min idle channels.
+		if !ch.taken {
+			ch.ch.Close()
+
+			p.lock.Lock()
+			p.autoPool.size--
+			p.lock.Unlock()
+		}
+	} else {
+		go p.kill(time.NewTimer(1*time.Minute), ch) // Restart.
+		return
+	}
 }
 
 // GetFreeChannel() will try to get a free unused channel from the pool.
@@ -120,7 +157,7 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 
 	select {
 	case ch := <-p.Pool:
-		if ch.IsClosed() { // Close in other part of code, or broker closed it
+		if ch.ch.IsClosed() { // Close in other part of code, or broker closed it
 			newCh, err := p.Conn.Channel()
 			if err != nil {
 				return nil, err
@@ -128,6 +165,12 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 			if prefetchCounter > 0 {
 				newCh.Qos(prefetchCounter, 0, false)
 			}
+
+			if p.auto {
+				elapsed := time.Since(t)
+				p.autoPool.waitTime <- elapsed.Milliseconds()
+			}
+
 			return newCh, nil
 		}
 
@@ -135,7 +178,10 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 			elapsed := time.Since(t)
 			p.autoPool.waitTime <- elapsed.Milliseconds()
 		}
-		return ch, nil
+
+		ch.taken = true
+
+		return ch.ch, nil
 	case <-ctx.Done():
 		if p.auto {
 			p.autoPool.timeOut <- true
@@ -145,7 +191,7 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 }
 
 // autoPoolListen() will listen for metrics in the background for auto-scaling the pool
-func (p *Pool) autoPoolListen() {
+func (p *Pool) autoPoolListen(ch *channelPool) {
 	alpha := 0.3 // Balanced responsiveness
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -161,12 +207,42 @@ func (p *Pool) autoPoolListen() {
 			p.AutoConfig.acquireTimeouts++
 
 		case <-ticker.C:
-			p.evaluateScale() // perform auto-scaling logic every 2s
+			p.evaluateScale(ch) // perform auto-scaling logic every 2s
 		}
 	}
 }
 
+// evaluateScale() scales the pool based on conditions
+func (p *Pool) evaluateScale(ch *channelPool) {
+	currentSizeWithoutClosed := ch.autoPool.size
+	currentSizeWithClosed := len(ch.Pool)
+
+	for range max(currentSizeWithClosed-currentSizeWithoutClosed, 0) {
+		c := <-ch.Pool
+		c.ch.Close()
+	}
+
+	avgWait := p.AutoConfig.acquireWaitTimeAvg
+	timeouts := p.AutoConfig.acquireTimeouts
+
+	max := p.AutoConfig.MaxChannels
+
+	// Scale Up (avg wait time is greater than 100ms or there are 2+ timeouts)
+	if (avgWait > 100 || timeouts > 2) && currentSizeWithoutClosed < max {
+		step := 1
+		if avgWait > 200 { // Upscale the step if avg wait time is more than 200ms
+			step = 2
+		}
+
+		newSize := min(currentSizeWithoutClosed+step, max)
+
+		p.resizePool(newSize)
+		p.AutoConfig.acquireTimeouts = 0 // reset counter
+		return
+	}
+}
+
 // Stub
-func (p *Pool) evaluateScale() {
+func (p *Pool) resizePool(newSize int) {
 
 }

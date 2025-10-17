@@ -1,6 +1,8 @@
 package mqpool
 
 import (
+	"sync"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -16,6 +18,7 @@ type AutoPool struct {
 	timeOut            chan bool  // will be true if a specific GetFreeChannel timesout
 	acquireWaitTimeAvg int64      // Avg of all wait durations in milliseconds.
 	acquireTimeouts    int        // Count of GetFreeChannel() timeouts.
+	size               int        // Size of the pool
 }
 
 // Pool struct is the main struct to initialize channel pooling.
@@ -46,8 +49,15 @@ type QueueConfig struct {
 
 // channelPool struct is what you get once you initialize pool using Pool.Init()
 type channelPool struct {
-	Pool     chan *amqp.Channel // Buffered chan of *amqp.Channel which is the actual pool
+	Pool     chan *channelModel // Buffered chan of *amqp.Channel which is the actual pool
 	Conn     *amqp.Connection   // The connection that handles all the channels
 	auto     bool               // will be set to true if Pool.Auto = true
 	autoPool *AutoPool          // will be automatically set if Pool.Auto = true
+	lock     *sync.Mutex        // Mutex lock to prevent race conditions
+}
+
+// channelModel represents the amqp channel and taken state.
+type channelModel struct {
+	ch    *amqp.Channel // amqp channel
+	taken bool          // true if its taken by a producer or consumer, false otherwise
 }
