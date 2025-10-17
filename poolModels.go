@@ -2,6 +2,7 @@ package mqpool
 
 import (
 	"sync"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -58,6 +59,7 @@ type channelPool struct {
 
 // channelModel represents the amqp channel and taken state.
 type channelModel struct {
-	ch    *amqp.Channel // amqp channel
-	taken bool          // true if its taken by a producer or consumer, false otherwise
+	ch       *amqp.Channel // amqp channel
+	taken    bool          // true if its taken by a producer or consumer, false otherwise
+	lastUsed time.Time
 }

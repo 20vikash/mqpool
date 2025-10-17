@@ -88,6 +88,8 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		go p.autoPoolListen(chPool)
 	}
 
+	chPool.kill() // goroutine listens in the background and closes idle channels
+
 	return chPool, nil
 }
 
@@ -95,20 +97,18 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 //
 // Reminder: Call this once you are done with an atomic mq operation to release the channel
 func (p *channelPool) PushChannel(ch *amqp.Channel) error {
-	chModel := &channelModel{ch: ch, taken: false}
-	ok := false
+	chModel := &channelModel{ch: ch, taken: false, lastUsed: time.Now()}
 
 	if chModel.ch.IsClosed() { // Makes sure closed channel dont get pushed
 		channel, err := p.Conn.Channel()
 		if err != nil {
 			return err
 		}
-		chModel = &channelModel{ch: channel, taken: false}
+		chModel = &channelModel{ch: channel, taken: false, lastUsed: time.Now()}
 	}
 
 	select {
 	case p.Pool <- chModel:
-		ok = true
 	default:
 		err := ch.Close() // pool full, close the extra channel
 		if err != nil {
@@ -116,29 +116,37 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 		}
 	}
 
-	if ok { // If the channel is idle for 1 minute, close it(scale down)
-		go p.kill(time.NewTimer(1*time.Minute), chModel)
-	}
-
 	return nil
 }
 
 // kill() will close the channel after it exceedes its idle timeout.
-func (p *channelPool) kill(timer *time.Timer, ch *channelModel) {
-	<-timer.C
+//
+// If the channel is idle for 1 minute, close it(scale down)
+func (p *channelPool) kill() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 
-	if len(p.Pool) > p.autoPool.MinChannels { // If its greater than the min idle channels.
-		if !ch.taken {
-			ch.ch.Close()
+		for range ticker.C {
+		L:
+			for {
+				select {
+				case ch := <-p.Pool:
+					if !ch.taken && time.Since(ch.lastUsed) > 1*time.Minute && p.autoPool.size > p.autoPool.MinChannels {
+						ch.ch.Close()
 
-			p.lock.Lock()
-			p.autoPool.size--
-			p.lock.Unlock()
+						p.lock.Lock()
+						p.autoPool.size--
+						p.lock.Unlock()
+					} else {
+						p.Pool <- ch
+					}
+				default:
+					break L
+				}
+			}
 		}
-	} else {
-		go p.kill(time.NewTimer(1*time.Minute), ch) // Restart.
-		return
-	}
+	}()
 }
 
 // GetFreeChannel() will try to get a free unused channel from the pool.
