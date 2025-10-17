@@ -109,8 +109,14 @@ func (p *channelPool) PushChannel(ch *amqp.Channel) error {
 
 	select {
 	case p.Pool <- chModel:
+		if p.auto {
+			atomic.AddInt32(&p.autoPool.size, 1)
+		}
 	default:
 		err := ch.Close() // pool full, close the extra channel
+		if p.auto {
+			atomic.AddInt32(&p.autoPool.size, -1)
+		}
 		if err != nil {
 			return err
 		}
@@ -182,7 +188,6 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 		}
 
 		if p.auto {
-			atomic.AddInt32(&p.autoPool.size, -1)
 			elapsed := time.Since(t)
 			p.autoPool.waitTime <- elapsed.Milliseconds()
 		}
@@ -212,7 +217,7 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 			atomic.StoreInt64(&p.AutoConfig.acquireWaitTimeAvg, int64(newAvg))
 
 		case <-p.AutoConfig.timeOut:
-			atomic.AddInt32(&p.AutoConfig.acquireTimeouts, -1)
+			atomic.AddInt32(&p.AutoConfig.acquireTimeouts, 1)
 
 		case <-ticker.C:
 			p.evaluateScale(ch) // perform auto-scaling logic every 2s
@@ -222,7 +227,7 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 
 // evaluateScale() scales the pool based on conditions
 func (p *Pool) evaluateScale(ch *channelPool) {
-	currentSizeWithoutClosed := ch.autoPool.size
+	currentSizeWithoutClosed := atomic.LoadInt32(&ch.autoPool.size)
 	currentSizeWithClosed := int32(len(ch.Pool))
 
 	diff := currentSizeWithClosed - currentSizeWithoutClosed
@@ -232,6 +237,8 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 			select {
 			case c := <-ch.Pool:
 				c.ch.Close()
+				atomic.AddInt32(&ch.autoPool.size, -1)
+				currentSizeWithoutClosed = ch.autoPool.size
 			default:
 				break L
 			}
@@ -260,7 +267,7 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 
 // resizePool() will scale up by step
 func (p *Pool) resizePool(newSize int, ch *channelPool) error {
-	step := newSize - len(ch.Pool) // Guarenteed its always scale up
+	step := int32(newSize) - atomic.LoadInt32(&ch.autoPool.size) // Guarenteed its always scale up
 
 	for range step {
 		channel, err := p.Conn.Channel()
