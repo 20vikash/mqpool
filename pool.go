@@ -244,13 +244,28 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 
 		newSize := min(currentSizeWithoutClosed+step, max)
 
-		p.resizePool(newSize)
+		p.resizePool(newSize, ch)
 		p.AutoConfig.acquireTimeouts = 0 // reset counter
 		return
 	}
 }
 
-// Stub
-func (p *Pool) resizePool(newSize int) {
+// resizePool() will scale up by step
+func (p *Pool) resizePool(newSize int, ch *channelPool) error {
+	step := newSize - len(ch.Pool) // Guarenteed its always scale up
 
+	for range step {
+		channel, err := p.Conn.Channel()
+		if err != nil {
+			return err
+		}
+
+		ch.lock.Lock()
+		ch.autoPool.size++
+		ch.lock.Unlock()
+
+		ch.Pool <- &channelModel{ch: channel, taken: false, lastUsed: time.Now()}
+	}
+
+	return nil
 }
