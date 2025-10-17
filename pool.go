@@ -3,6 +3,7 @@ package mqpool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -55,9 +56,10 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		num = p.AutoConfig.MaxChannels
 	}
 	chPool := &channelPool{
-		Pool: make(chan *channelModel, num),
-		Conn: p.Conn,
-		auto: p.Auto,
+		Pool:   make(chan *channelModel, num),
+		Conn:   p.Conn,
+		auto:   p.Auto,
+		closed: make(chan struct{}),
 	}
 
 	if p.Auto {
@@ -77,13 +79,15 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		if err != nil {
 			return nil, errors.New(mqerrors.CANNOT_CREATE_CHANNEL)
 		}
+		chModel := &channelModel{ch: ch, taken: atomic.Bool{}}
+		chModel.taken.Store(false)
 
-		chPool.Pool <- &channelModel{ch: ch, taken: false}
+		chPool.Pool <- chModel
 	}
 
 	if p.Auto {
 		// Length of the pool
-		chPool.autoPool.size = int32(len(chPool.Pool))
+		chPool.autoPool.size = int32(num)
 
 		// Spin up pool listener to auto scale the pool
 		go p.autoPoolListen(chPool)
@@ -97,26 +101,22 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 //
 // Reminder: Call this once you are done with an atomic mq operation to release the channel
 func (p *channelPool) PushChannel(ch *amqp.Channel) error {
-	chModel := &channelModel{ch: ch, taken: false, lastUsed: time.Now()}
+	chModel := &channelModel{ch: ch, taken: atomic.Bool{}, lastUsed: time.Now()}
+	chModel.taken.Store(false)
 
 	if chModel.ch.IsClosed() { // Makes sure closed channel dont get pushed
 		channel, err := p.Conn.Channel()
 		if err != nil {
 			return err
 		}
-		chModel = &channelModel{ch: channel, taken: false, lastUsed: time.Now()}
+		chModel = &channelModel{ch: channel, taken: atomic.Bool{}, lastUsed: time.Now()}
+		chModel.taken.Store(false)
 	}
 
 	select {
 	case p.Pool <- chModel:
-		if p.auto {
-			atomic.AddInt32(&p.autoPool.size, 1)
-		}
 	default:
 		err := ch.Close() // pool full, close the extra channel
-		if p.auto {
-			atomic.AddInt32(&p.autoPool.size, -1)
-		}
 		if err != nil {
 			return err
 		}
@@ -133,20 +133,28 @@ func (p *channelPool) kill() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
-		for range ticker.C {
-		L:
-			for {
-				select {
-				case ch := <-p.Pool:
-					if !ch.taken && time.Since(ch.lastUsed) > 1*time.Minute && p.autoPool.size > p.autoPool.MinChannels {
-						ch.ch.Close()
+		for {
+			select {
+			case <-p.closed:
+				return
+			case <-ticker.C:
+			L:
+				for {
+					select {
+					case ch := <-p.Pool:
+						if !ch.taken.Load() && time.Since(ch.lastUsed) > 1*time.Minute && p.autoPool.size > p.autoPool.MinChannels {
+							ch.ch.Close()
 
-						atomic.AddInt32(&p.autoPool.size, -1)
-					} else {
-						p.Pool <- ch
+							atomic.AddInt32(&p.autoPool.size, -1)
+						} else {
+							select {
+							case p.Pool <- ch:
+							default:
+							}
+						}
+					default:
+						break L
 					}
-				default:
-					break L
 				}
 			}
 		}
@@ -179,9 +187,11 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 			}
 
 			if p.auto {
-				atomic.AddInt32(&p.autoPool.size, -1)
 				elapsed := time.Since(t)
-				p.autoPool.waitTime <- elapsed.Milliseconds()
+				select {
+				case p.autoPool.waitTime <- elapsed.Milliseconds():
+				default:
+				}
 			}
 
 			return newCh, nil
@@ -189,15 +199,21 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 
 		if p.auto {
 			elapsed := time.Since(t)
-			p.autoPool.waitTime <- elapsed.Milliseconds()
+			select {
+			case p.autoPool.waitTime <- elapsed.Milliseconds():
+			default:
+			}
 		}
 
-		ch.taken = true
+		ch.taken.Store(true)
 
 		return ch.ch, nil
 	case <-ctx.Done():
 		if p.auto {
-			p.autoPool.timeOut <- true
+			select {
+			case p.autoPool.timeOut <- true:
+			default:
+			}
 		}
 		return nil, ctx.Err()
 	}
@@ -211,6 +227,8 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 
 	for {
 		select {
+		case <-ch.closed:
+			return // Gracefully shutdown
 		case newWait := <-p.AutoConfig.waitTime:
 			// Compute EMA for average wait time
 			newAvg := alpha*float64(newWait) + (1-alpha)*float64(atomic.LoadInt64(&p.AutoConfig.acquireWaitTimeAvg))
@@ -227,18 +245,20 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 
 // evaluateScale() scales the pool based on conditions
 func (p *Pool) evaluateScale(ch *channelPool) {
-	currentSizeWithoutClosed := atomic.LoadInt32(&ch.autoPool.size)
-	currentSizeWithClosed := int32(len(ch.Pool))
+	activePoolChans := atomic.LoadInt32(&ch.autoPool.size)
+	TotalPoolChans := int32(len(ch.Pool))
 
-	diff := currentSizeWithClosed - currentSizeWithoutClosed
+	diff := TotalPoolChans - activePoolChans
 	if diff > 0 {
 	L:
 		for range diff {
 			select {
 			case c := <-ch.Pool:
-				c.ch.Close()
+				if !c.ch.IsClosed() {
+					c.ch.Close()
+				}
 				atomic.AddInt32(&ch.autoPool.size, -1)
-				currentSizeWithoutClosed = ch.autoPool.size
+				activePoolChans = ch.autoPool.size
 			default:
 				break L
 			}
@@ -251,13 +271,13 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 	max := p.AutoConfig.MaxChannels
 
 	// Scale Up (avg wait time is greater than 100ms or there are 2+ timeouts)
-	if (avgWait > 100 || timeouts > 2) && currentSizeWithoutClosed < max {
+	if (avgWait > 100 || timeouts > 2) && activePoolChans < max {
 		step := 1
 		if avgWait > 200 { // Upscale the step if avg wait time is more than 200ms
 			step = 2
 		}
 
-		newSize := min(currentSizeWithoutClosed+int32(step), max)
+		newSize := min(activePoolChans+int32(step), max)
 
 		p.resizePool(int(newSize), ch)
 		atomic.StoreInt32(&p.AutoConfig.acquireTimeouts, 0) // reset counter
@@ -266,19 +286,32 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 }
 
 // resizePool() will scale up by step
-func (p *Pool) resizePool(newSize int, ch *channelPool) error {
+func (p *Pool) resizePool(newSize int, ch *channelPool) {
 	step := int32(newSize) - atomic.LoadInt32(&ch.autoPool.size) // Guarenteed its always scale up
 
 	for range step {
 		channel, err := p.Conn.Channel()
 		if err != nil {
-			return err
+			fmt.Println("Failed to create a new channel while resizing")
+		} else {
+			atomic.AddInt32(&ch.autoPool.size, 1)
+			chModel := &channelModel{ch: channel, taken: atomic.Bool{}, lastUsed: time.Now()}
+			chModel.taken.Store(false)
+
+			ch.Pool <- chModel
 		}
-
-		atomic.AddInt32(&ch.autoPool.size, 1)
-
-		ch.Pool <- &channelModel{ch: channel, taken: false, lastUsed: time.Now()}
 	}
+}
 
-	return nil
+// Gracefully closes the pool
+func (p *channelPool) Close() {
+	close(p.closed)
+	for {
+		select {
+		case ch := <-p.Pool:
+			ch.ch.Close()
+		default:
+			return
+		}
+	}
 }

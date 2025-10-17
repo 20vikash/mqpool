@@ -1,6 +1,7 @@
 package mqpool
 
 import (
+	"sync/atomic"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -53,11 +54,12 @@ type channelPool struct {
 	Conn     *amqp.Connection   // The connection that handles all the channels
 	auto     bool               // will be set to true if Pool.Auto = true
 	autoPool *AutoPool          // will be automatically set if Pool.Auto = true
+	closed   chan struct{}      // To gracefully close the pool
 }
 
 // channelModel represents the amqp channel and taken state.
 type channelModel struct {
 	ch       *amqp.Channel // amqp channel
-	taken    bool          // true if its taken by a producer or consumer, false otherwise
+	taken    atomic.Bool   // true if its taken by a producer or consumer, false otherwise
 	lastUsed time.Time
 }
