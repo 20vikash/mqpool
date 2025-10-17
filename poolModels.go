@@ -10,10 +10,11 @@ const (
 
 // AutoPool struct defines the Min and Max channels for dynamic channel resizing
 type AutoPool struct {
-	MinChannels        int // Minimum number of channels(idle)
-	MaxChannels        int // Max number of channels
-	acquireWaitTimeAvg int // Sum of all wait durations in nanoseconds.
-	acquireTimeouts    int // Count of GetFreeChannel() timeouts.
+	MinChannels        int      // Minimum number of channels(idle)
+	MaxChannels        int      // Max number of channels
+	waitTime           chan int // Wait time of a specific borrow in nanoseconds
+	acquireWaitTimeAvg int      // Avg of all wait durations in nanoseconds.
+	acquireTimeouts    int      // Count of GetFreeChannel() timeouts.
 }
 
 // Pool struct is the main struct to initialize channel pooling.
