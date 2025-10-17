@@ -144,7 +144,29 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 	}
 }
 
-// Stub
+// autoPoolListen() will listen for metrics in the background for auto-scaling the pool
 func (p *Pool) autoPoolListen() {
+	alpha := 0.3 // Balanced responsiveness
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case newWait := <-p.AutoConfig.waitTime:
+			// Compute EMA for average wait time
+			newAvg := alpha*float64(newWait) + (1-alpha)*float64(p.AutoConfig.acquireWaitTimeAvg)
+			p.AutoConfig.acquireWaitTimeAvg = int64(newAvg)
+
+		case <-p.AutoConfig.timeOut:
+			p.AutoConfig.acquireTimeouts++
+
+		case <-ticker.C:
+			p.evaluateScale() // perform auto-scaling logic every 2s
+		}
+	}
+}
+
+// Stub
+func (p *Pool) evaluateScale() {
 
 }
