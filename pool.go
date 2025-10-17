@@ -211,7 +211,9 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 			p.AutoConfig.acquireWaitTimeAvg = int64(newAvg)
 
 		case <-p.AutoConfig.timeOut:
+			ch.lock.Lock()
 			p.AutoConfig.acquireTimeouts++
+			ch.lock.Unlock()
 
 		case <-ticker.C:
 			p.evaluateScale(ch) // perform auto-scaling logic every 2s
