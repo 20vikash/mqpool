@@ -86,9 +86,8 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 	if p.Auto {
 		// Spin up pool listener to auto scale the pool
 		go p.autoPoolListen(chPool)
+		chPool.kill() // goroutine listens in the background and closes idle channels
 	}
-
-	chPool.kill() // goroutine listens in the background and closes idle channels
 
 	return chPool, nil
 }
