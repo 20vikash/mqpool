@@ -208,8 +208,8 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 		select {
 		case newWait := <-p.AutoConfig.waitTime:
 			// Compute EMA for average wait time
-			newAvg := alpha*float64(newWait) + (1-alpha)*float64(p.AutoConfig.acquireWaitTimeAvg)
-			p.AutoConfig.acquireWaitTimeAvg = int64(newAvg)
+			newAvg := alpha*float64(newWait) + (1-alpha)*float64(atomic.LoadInt64(&p.AutoConfig.acquireWaitTimeAvg))
+			atomic.StoreInt64(&p.AutoConfig.acquireWaitTimeAvg, int64(newAvg))
 
 		case <-p.AutoConfig.timeOut:
 			atomic.AddInt32(&p.AutoConfig.acquireTimeouts, -1)
@@ -238,8 +238,8 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 		}
 	}
 
-	avgWait := p.AutoConfig.acquireWaitTimeAvg
-	timeouts := p.AutoConfig.acquireTimeouts
+	avgWait := atomic.LoadInt64(&p.AutoConfig.acquireWaitTimeAvg)
+	timeouts := atomic.LoadInt32(&p.AutoConfig.acquireTimeouts)
 
 	max := p.AutoConfig.MaxChannels
 
@@ -253,7 +253,7 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 		newSize := min(currentSizeWithoutClosed+int32(step), max)
 
 		p.resizePool(int(newSize), ch)
-		p.AutoConfig.acquireTimeouts = 0 // reset counter
+		atomic.StoreInt32(&p.AutoConfig.acquireTimeouts, 0) // reset counter
 		return
 	}
 }
