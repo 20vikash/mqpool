@@ -1,7 +1,6 @@
 package mqpool
 
 import (
-	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -13,20 +12,20 @@ const (
 
 // AutoPool struct defines the Min and Max channels for dynamic channel resizing
 type AutoPool struct {
-	MinChannels        int        // Minimum number of channels(idle)
-	MaxChannels        int        // Max number of channels
+	MinChannels        int32      // Minimum number of channels(idle)
+	MaxChannels        int32      // Max number of channels
 	waitTime           chan int64 // Wait time of a specific borrow in milliseconds
 	timeOut            chan bool  // will be true if a specific GetFreeChannel timesout
 	acquireWaitTimeAvg int64      // Avg of all wait durations in milliseconds.
-	acquireTimeouts    int        // Count of GetFreeChannel() timeouts.
-	size               int        // Size of the pool
+	acquireTimeouts    int32      // Count of GetFreeChannel() timeouts.
+	size               int32      // Size of the pool
 }
 
 // Pool struct is the main struct to initialize channel pooling.
 type Pool struct {
 	Conn       *amqp.Connection // The MQ connection object
 	Auto       bool             // Set it to true if dynamic pooling is required
-	NChan      int              // NChan is the number of channels in the pool for static pool(if Auto = false)
+	NChan      int32            // NChan is the number of channels in the pool for static pool(if Auto = false)
 	AutoConfig *AutoPool        // Initialize this if Auto = true
 }
 
@@ -54,7 +53,6 @@ type channelPool struct {
 	Conn     *amqp.Connection   // The connection that handles all the channels
 	auto     bool               // will be set to true if Pool.Auto = true
 	autoPool *AutoPool          // will be automatically set if Pool.Auto = true
-	lock     *sync.Mutex        // Mutex lock to prevent race conditions
 }
 
 // channelModel represents the amqp channel and taken state.

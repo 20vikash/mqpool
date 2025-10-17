@@ -3,6 +3,7 @@ package mqpool
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	mqerrors "github.com/20vikash/mqpool/internal/errors"
@@ -46,12 +47,12 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		return nil, err
 	}
 
-	var num int
+	var num int32
 
 	if !p.Auto { // Static pooling
 		num = p.NChan
 	} else {
-		num = p.AutoConfig.MinChannels
+		num = p.AutoConfig.MaxChannels
 	}
 	chPool := &channelPool{
 		Pool: make(chan *channelModel, num),
@@ -67,8 +68,8 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		chPool.autoPool.acquireWaitTimeAvg = 0
 		chPool.autoPool.acquireTimeouts = 0
 
-		// Set num to maxChannels
-		num = p.AutoConfig.MaxChannels
+		// Set num to minChannels
+		num = p.AutoConfig.MinChannels
 	}
 
 	for range num {
@@ -82,7 +83,7 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 
 	if p.Auto {
 		// Length of the pool
-		chPool.autoPool.size = len(chPool.Pool)
+		chPool.autoPool.size = int32(len(chPool.Pool))
 
 		// Spin up pool listener to auto scale the pool
 		go p.autoPoolListen(chPool)
@@ -134,9 +135,7 @@ func (p *channelPool) kill() {
 					if !ch.taken && time.Since(ch.lastUsed) > 1*time.Minute && p.autoPool.size > p.autoPool.MinChannels {
 						ch.ch.Close()
 
-						p.lock.Lock()
-						p.autoPool.size--
-						p.lock.Unlock()
+						atomic.AddInt32(&p.autoPool.size, -1)
 					} else {
 						p.Pool <- ch
 					}
@@ -174,6 +173,7 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 			}
 
 			if p.auto {
+				atomic.AddInt32(&p.autoPool.size, -1)
 				elapsed := time.Since(t)
 				p.autoPool.waitTime <- elapsed.Milliseconds()
 			}
@@ -182,6 +182,7 @@ func (p *channelPool) GetFreeChannel(ctx context.Context, prefetchCounter int) (
 		}
 
 		if p.auto {
+			atomic.AddInt32(&p.autoPool.size, -1)
 			elapsed := time.Since(t)
 			p.autoPool.waitTime <- elapsed.Milliseconds()
 		}
@@ -211,9 +212,7 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 			p.AutoConfig.acquireWaitTimeAvg = int64(newAvg)
 
 		case <-p.AutoConfig.timeOut:
-			ch.lock.Lock()
-			p.AutoConfig.acquireTimeouts++
-			ch.lock.Unlock()
+			atomic.AddInt32(&p.AutoConfig.acquireTimeouts, -1)
 
 		case <-ticker.C:
 			p.evaluateScale(ch) // perform auto-scaling logic every 2s
@@ -224,7 +223,7 @@ func (p *Pool) autoPoolListen(ch *channelPool) {
 // evaluateScale() scales the pool based on conditions
 func (p *Pool) evaluateScale(ch *channelPool) {
 	currentSizeWithoutClosed := ch.autoPool.size
-	currentSizeWithClosed := len(ch.Pool)
+	currentSizeWithClosed := int32(len(ch.Pool))
 
 	diff := currentSizeWithClosed - currentSizeWithoutClosed
 	if diff > 0 {
@@ -251,9 +250,9 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 			step = 2
 		}
 
-		newSize := min(currentSizeWithoutClosed+step, max)
+		newSize := min(currentSizeWithoutClosed+int32(step), max)
 
-		p.resizePool(newSize, ch)
+		p.resizePool(int(newSize), ch)
 		p.AutoConfig.acquireTimeouts = 0 // reset counter
 		return
 	}
@@ -269,9 +268,7 @@ func (p *Pool) resizePool(newSize int, ch *channelPool) error {
 			return err
 		}
 
-		ch.lock.Lock()
-		ch.autoPool.size++
-		ch.lock.Unlock()
+		atomic.AddInt32(&ch.autoPool.size, 1)
 
 		ch.Pool <- &channelModel{ch: channel, taken: false, lastUsed: time.Now()}
 	}
