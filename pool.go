@@ -80,10 +80,10 @@ func (p *Pool) Init() (*channelPool, error) { // Exported method
 		chPool.Pool <- &channelModel{ch: ch, taken: false}
 	}
 
-	// Length of the pool
-	chPool.autoPool.size = len(chPool.Pool)
-
 	if p.Auto {
+		// Length of the pool
+		chPool.autoPool.size = len(chPool.Pool)
+
 		// Spin up pool listener to auto scale the pool
 		go p.autoPoolListen(chPool)
 		chPool.kill() // goroutine listens in the background and closes idle channels
