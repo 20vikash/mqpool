@@ -224,9 +224,17 @@ func (p *Pool) evaluateScale(ch *channelPool) {
 	currentSizeWithoutClosed := ch.autoPool.size
 	currentSizeWithClosed := len(ch.Pool)
 
-	for range max(currentSizeWithClosed-currentSizeWithoutClosed, 0) {
-		c := <-ch.Pool
-		c.ch.Close()
+	diff := currentSizeWithClosed - currentSizeWithoutClosed
+	if diff > 0 {
+	L:
+		for range diff {
+			select {
+			case c := <-ch.Pool:
+				c.ch.Close()
+			default:
+				break L
+			}
+		}
 	}
 
 	avgWait := p.AutoConfig.acquireWaitTimeAvg
